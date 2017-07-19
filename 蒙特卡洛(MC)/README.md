@@ -14,7 +14,7 @@
 - [dennybritz 的强化学习实践](https://github.com/dennybritz/reinforcement-learning)
 
 
-##备注：
+## 备注：
 - 虽然视频上的分布是先Predict再Control，但是教材和实践部分都是将Lecture4和Lecture5结合在一起（先MC后TD），所以还是按照实践部分去编排了。
 - 算法流程主要是参考教材上的伪代码，关于MC的部分视频中没有伪代码。
 
