@@ -4,7 +4,7 @@ import tensorflow as tf
 np.random.seed(1)
 tf.set_random_seed(1)
 
-class DeepQNetwork:
+class DoubleDQN:
     def __init__(self,
                  n_actions,
                  n_features,
@@ -16,6 +16,8 @@ class DeepQNetwork:
                  batch_size = 32,
                  e_greedy_increment = None,
                  output_graph = False,
+                 double_q = True,
+                 sess = None
                  ):
         self.n_actions = n_actions
         self.n_features = n_features
@@ -26,6 +28,7 @@ class DeepQNetwork:
         self.memory_size = memory_size
         self.batch_size = batch_size
         self.epsilon_increment = e_greedy_increment
+        self.double_q  = double_q
         self.epsilon = 0 if e_greedy_increment is not None else self.epsilon_max
         
         #记录学习次数（用于判断是否更新）
@@ -43,7 +46,12 @@ class DeepQNetwork:
         # $ tensorboard --logdir=logs
             tf.summary.FileWriter("logs/", self.sess.graph)
 
-        self.sess.run(tf.global_variables_initializer())
+        if sess is None:
+            self.sess = tf.Session()
+            self.sess.run(tf.global_variables_initializer())
+        else:
+            self.sess = sess
+            
         self.cost_his = []
     
     def _build_net(self):      
@@ -110,15 +118,23 @@ class DeepQNetwork:
         self.memory_counter += 1
         
     #选择一个行为：
-    def choose_action(self, observation):
+    def choose_action(self, observaion):
         #将格式变成成[1, size_of_observaion]， newaxis相当于新加了一个周
-        observation = observation[np.newaxis, :]
+        observation = observaion[np.newaxis, :]
+        
+        actions_value = self.sess.run(self.q_eval, feed_dict = {self.s:observation})
+        action = np.argmax(actions_value)
+        
+        if not hasattr(self, 'q'):
+            self.q = []
+            self.running_q = 0
+        
+        #滑动平均，减少抖动？
+        self.running_q = self.running_q * 0.99 + 0.01 * np.max(actions_value)
+        self.q.append(self.running_q)
         
         #self.s: 表示传入的是一个怎么样的值
-        if np.random.uniform() < self.epsilon:
-            actions_value = self.sess.run(self.q_eval, feed_dict = {self.s: observation})
-            action = np.argmax(actions_value)
-        else:
+        if np.random.uniform() > self.epsilon:
             action = np.random.randint(0, self.n_actions)
             
         return action
@@ -132,43 +148,46 @@ class DeepQNetwork:
         
     #进行学习
     def learn(self):
-        #替换参数
+    
         if self.learn_step_counter % self.replace_target_iter == 0:
             self._replace_target_params()
             print('\n target_params_replace\n')
             
-        #size表示随机数的结果的结构， 前面表示在某个方位里面取。
-        #如果少了，那么就会重复，但是关系不大。
         if self.memory_counter > self.memory_size:
             sample_index = np.random.choice(self.memory_size, size = self.batch_size)
         else:
             sample_index = np.random.choice(self.memory_counter, size = self.batch_size)
-        #按照下表取对应行的值
+
         batch_memory = self.memory[sample_index, :]
         
-        #分别得到两个网络中对应的replay的Q值。
-        #注意这里的Q是包含当前状态的所有action的Q的，所以在后续需要进行处理，之前选择的action的Q值。
-        #细节:这里的-：和：表示最前面何最后面
-        q_next, q_eval = self.sess.run(
-        [self.q_next, self.q_eval],
-        feed_dict = {
-            self.s_: batch_memory[:, -self.n_features:],
-            self.s : batch_memory[:, :self.n_features]
-            }
-        )
+        #都使用下一个状态进行计算，得到下一个状态的目标值和估计值。
+        q_next, q_eval4next = self.sess.run(
+            [self.q_next, self.q_eval],
+            feed_dict = {
+                self.s_: batch_memory[:, -self.n_features:],
+                self.s : batch_memory[:, -self.n_features:]
+                }
+            )
+        q_eval = self.sess.run(self.q_eval, {self.s: batch_memory[:, :self.n_features]})
         
-        #这里进行的处理是首先复制了eval给target，然后根据action的选择，将q_next对应项的Q进行加法处理，之后与——next
+
         q_target = q_eval.copy()
         batch_index = np.arange(self.batch_size, dtype = np.int32)
-        #batch中所有的行对应的action的下表。
         eval_act_index = batch_memory[:, self.n_features].astype(int)
         reward = batch_memory[:, self.n_features + 1]
+       
+        #如果是double，选择下一个状态的评估值中的最大者的action作为action。
+        #获取这个action在下一个状态下的目标值，作为实际的目标值。
+        if self.double_q:
+            max_act4next = np.argmax(q_eval4next, axis = 1)
+            selected_q_next = q_next[batch_index, max_act4next]
+        else:
+            selected_q_next = np.max(q_next, axis = 1)
         #对target中的对应的每一行的对应列进行赋值，即memory-action的值变成q_next中的max。
-        q_target[batch_index, eval_act_index] = reward + self.gamma * np.max(q_next, axis = 1)
+        q_target[batch_index, eval_act_index] = reward + self.gamma * selected_q_next
         
         
-        #这时，只要再次减去q_eval就可以把剩余的行清零了。
-        #传入Q-target，剩余的q_eval自带计算，计算得到cost，并进行优化调参。 
+ 
         _, self.cost = self.sess.run([self._train_op, self.loss], feed_dict = {self.s: batch_memory[:, :self.n_features], self.q_target: q_target})
         
         self.cost_his.append(self.cost)
