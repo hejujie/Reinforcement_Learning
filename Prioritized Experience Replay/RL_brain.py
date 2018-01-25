@@ -50,7 +50,7 @@ class SumTree(object):
         if parent_idx != 0
             self._propagate_change(parent_idx, change)
     
-    
+    # 获取节点
     def get_leaf(self, lower_bound):
         leaf_idx = self._retrieve(lower_bound)
         data_idx = leaf_idx - self.capacity + 1
@@ -84,12 +84,13 @@ class Memory(object):
     def __init__(self, capacity):
         self.tree = SumTree(capacity)
     
+    #找到
     def store(self, transition):
         max_p = np.max(self.tree.tree[-self.tree.capacity:])
         if max_p == 0:
             max_p = self.abs_err_upper
         self.tree.add_new_priority(max_p, transition)
-    
+        
     
 
 

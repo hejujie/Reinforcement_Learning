@@ -137,7 +137,7 @@ class DeepQNetwork:
             self._replace_target_params()
             print('\n target_params_replace\n')
             
-        #size表示随机数的结果的结构， 前面表示在某个方位里面取。
+        #size表示随机数的结果的结构， 前面表示在某个范围里面取。
         #如果少了，那么就会重复，但是关系不大。
         if self.memory_counter > self.memory_size:
             sample_index = np.random.choice(self.memory_size, size = self.batch_size)
